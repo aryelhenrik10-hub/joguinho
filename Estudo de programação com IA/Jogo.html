@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Guerreiro 2D - Mira Comum Aryel</title>
+    <style>
+        body { margin: 0; background: #111; color: #fff; font-family: sans-serif; overflow: hidden; touch-action: none; }
+        canvas { display: block; background: #222; margin: 0 auto; cursor: crosshair; }
+        .hud { position: absolute; top: 10px; left: 10px; pointer-events: none; font-size: 12px; z-index: 5; }
+        
+        .inventory {
+            position: absolute;
+            left: 10px;
+            top: 40%;
+            transform: translateY(-50%);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            background: rgba(0,0,0,0.5);
+            padding: 8px;
+            border-radius: 8px;
+            pointer-events: all;
+            z-index: 10;
+        }
+        .inv-slot {
+            width: 45px;
+            height: 45px;
+            border: 2px solid #555;
+            background: #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 9px;
+            color: #aaa;
+            position: relative;
+            text-align: center;
+        }
+        .inv-slot.active { border-color: #3498db; background: #444; color: #fff; }
+        .inv-slot::after { content: attr(data-key); position: absolute; top: 2px; left: 2px; font-size: 8px; }
+
+        .mobile-controls {
+            position: absolute;
+            bottom: 30px;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 40px;
+            box-sizing: border-box;
+            pointer-events: none;
+            z-index: 20;
+        }
+        .joystick-container {
+            width: 130px;
+            height: 130px;
+            background: rgba(255,255,255,0.05);
+            border: 2px solid rgba(255,255,255,0.1);
+            border-radius: 50%;
+            position: relative;
+            pointer-events: all;
+        }
+        .joystick-stick {
+            width: 55px;
+            height: 55px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 50%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+        
+        #joystick-aim { border-color: rgba(52, 152, 219, 0.3); }
+        #stick-aim { background: rgba(52, 152, 219, 0.4); }
+
+        .action-buttons {
+            position: absolute;
+            bottom: 180px;
+            right: 40px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            pointer-events: all;
+        }
+        .btn {
+            width: 65px;
+            height: 65px;
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            user-select: none;
+            font-size: 11px;
+            color: white;
+            text-shadow: 1px 1px 2px black;
+        }
+        .btn:active { background: rgba(255,255,255,0.35); transform: scale(0.95); }
+        
+        @media (min-width: 1025px) {
+            .mobile-controls { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="hud"><p>Aryel | Mira Comum Separada</p></div>
+
+    <div class="inventory" id="inventory">
+        <div class="inv-slot active" data-index="0" data-key="1">Espada</div>
+        <div class="inv-slot" data-index="1" data-key="2">Arco</div>
+        <div class="inv-slot" data-index="2" data-key="3">Martelo</div>
+    </div>
+
+    <div class="mobile-controls" id="mobileUI">
+        <div class="joystick-container" id="joystick-move">
+            <div class="joystick-stick" id="stick-move"></div>
+        </div>
+
+        <div class="action-buttons">
+            <div class="btn" id="btn-attack" style="background: rgba(231, 76, 60, 0.5);">ATACAR</div>
+            <div class="btn" id="btn-dash" style="background: rgba(52, 152, 219, 0.4);">DASH</div>
+            <div class="btn" id="btn-jump" style="background: rgba(155, 89, 182, 0.4);">PULO</div>
+            <div class="btn" id="btn-block" style="background: rgba(46, 204, 113, 0.4);">DEFESA</div>
+        </div>
+
+        <div class="joystick-container" id="joystick-aim">
+            <div class="joystick-stick" id="stick-aim"></div>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const GRAVITY = 0.5;
+const FRICTION = 0.85;
+
+// Variáveis de Controle Separadas
+let moveX = 0;
+let aimX = 0;
+let aimY = 0;
+let isAiming = false;
+let mobileInput = { jump: false, attack: false, dash: false, block: false };
+
+let inventoryItems = ["Espada", "Arco", "Martelo", null];
+const sprites = {};
+const spriteFiles = ['Atacando.png', 'comomartelo.png', 'Animacaodeataque1.png', 'Animacaodeataque2.png', 'Animacaodeataque3.png', 'Animacaodeataque4.png', 'Animacaodeataque5.png', 'ataquemartelo1.png', 'ataquemartelo2.png', 'ataquemartelo3.png', 'ataquemartelo4.png', 'ataquemartelo5.png', 'ataquemartelo6.png', 'defender.png', 'EspadaIdle.png', 'Arco.png', 'Dash1.png', 'Dash2.png', 'Dash3.png'];
+
+spriteFiles.forEach(file => {
+    const img = new Image();
+    img.src = file;
+    img.onload = () => { img.isReady = true; };
+    sprites[file] = img;
+});
+
+let keys = {};
+let mouse = { x: 0, y: 0, left: false, right: false };
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+window.onkeydown = (e) => {
+    keys[e.code] = true;
+    if (e.key === '1') selectSlot(0);
+    if (e.key === '2') selectSlot(1);
+    if (e.key === '3') selectSlot(2);
+};
+window.onkeyup = (e) => keys[e.code] = false;
+window.onmousemove = (e) => { mouse.x = e.clientX; mouse.y = e.clientY; };
+window.onmousedown = (e) => { if(e.button === 0) mouse.left = true; if(e.button === 2) mouse.right = true; };
+window.onmouseup = (e) => { if(e.button === 0) mouse.left = false; if(e.button === 2) mouse.right = false; };
+
+function createJoystick(containerId, stickId, onMove, onEnd) {
+    const container = document.getElementById(containerId);
+    const stick = document.getElementById(stickId);
+    const handleMove = (e) => {
+        e.preventDefault();
+        const rect = container.getBoundingClientRect();
+        const touch = Array.from(e.touches).find(t => t.clientX >= rect.left && t.clientX <= rect.right) || e.touches[0];
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        let dx = touch.clientX - centerX;
+        let dy = touch.clientY - centerY;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        const maxDist = 60;
+        const limitedDist = Math.min(maxDist, dist);
+        const angle = Math.atan2(dy, dx);
+        const lx = Math.cos(angle) * limitedDist;
+        const ly = Math.sin(angle) * limitedDist;
+        stick.style.transform = `translate(calc(-50% + ${lx}px), calc(-50% + ${ly}px))`;
+        onMove(lx / maxDist, ly / maxDist, dist > 10);
+    };
+    container.addEventListener('touchstart', handleMove);
+    container.addEventListener('touchmove', handleMove);
+    container.addEventListener('touchend', () => {
+        stick.style.transform = `translate(-50%, -50%)`;
+        onEnd();
+    });
+}
+
+createJoystick('joystick-move', 'stick-move', (x) => moveX = x, () => moveX = 0);
+createJoystick('joystick-aim', 'stick-aim', (x, y, active) => { aimX = x; aimY = y; isAiming = active; }, () => { isAiming = false; });
+
+const setupBtn = (id, prop) => {
+    const el = document.getElementById(id);
+    el.addEventListener('touchstart', (e) => { e.preventDefault(); mobileInput[prop] = true; });
+    el.addEventListener('touchend', (e) => { e.preventDefault(); mobileInput[prop] = false; });
+};
+['jump', 'dash', 'block', 'attack'].forEach(p => setupBtn('btn-' + p, p));
+
+function selectSlot(index) {
+    const slots = document.querySelectorAll('.inv-slot');
+    slots.forEach(s => s.classList.remove('active'));
+    if (slots[index]) { slots[index].classList.add('active'); player.weaponIndex = index; }
+}
+document.querySelectorAll('.inv-slot').forEach(slot => slot.onclick = () => selectSlot(parseInt(slot.dataset.index)));
+
+class Arrow {
+    constructor(x, y, angle, owner) {
+        this.x = x; this.y = y; this.vx = Math.cos(angle) * 12; this.vy = Math.sin(angle) * 12;
+        this.angle = angle; this.active = true; this.owner = owner; this.w = 20; this.h = 4;
+    }
+    update(player, enemies) {
+        this.x += this.vx; this.y += this.vy;
+        if (this.owner === 'enemy') {
+            if (this.x < player.x + player.w && this.x + this.w > player.x && this.y < player.y + player.h && this.y + this.h > player.y) {
+                if (player.state !== 'BLOCK' && player.state !== 'DASH') player.hp -= 10;
+                this.active = false;
+            }
+        } else {
+            enemies.forEach(en => {
+                if (this.x < en.x + en.w && this.x + this.w > en.x && this.y < en.y + en.h && this.y + this.h > en.y) {
+                    en.hp -= 25; this.active = false;
+                }
+            });
+        }
+        if (this.x < 0 || this.x > 5000 || this.y < 0 || this.y > canvas.height) this.active = false;
+    }
+    draw() {
+        ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle);
+        ctx.fillStyle = this.owner === 'player' ? '#3498db' : '#f1c40f';
+        ctx.fillRect(0, -2, this.w, this.h); ctx.restore();
+    }
+}
+
+class Entity {
+    constructor(x, y, color) {
+        this.x = x; this.y = y; this.w = 50; this.h = 80; this.vx = 0; this.vy = 0;
+        this.hp = 100; this.maxHp = 100; this.color = color; this.grounded = false;
+    }
+    drawHealth() {
+        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(this.x - 5, this.y - 20, 60, 6);
+        ctx.fillStyle = this.hp > 30 ? '#2ecc71' : '#e74c3c';
+        ctx.fillRect(this.x - 5, this.y - 20, Math.max(0, (this.hp / this.maxHp) * 60), 6);
+    }
+}
+
+class Enemy extends Entity {
+    constructor(x, y) { super(x, y, '#e74c3c'); this.dir = 1; this.timer = 0; this.id = Math.random(); }
+    update(platforms, player) {
+        this.timer++; if(this.timer > 120) { this.dir *= -1; this.timer = 0; }
+        this.vx = this.dir * 2; this.vy += GRAVITY; this.x += this.vx; this.y += this.vy;
+        platforms.forEach(plat => {
+            if (this.x < plat.x + plat.w && this.x + this.w > plat.x && this.y < plat.y + plat.h && this.y + this.h > plat.y) {
+                if (this.vy > 0) { this.y = plat.y - this.h; this.vy = 0; }
+            }
+        });
+        const d = Math.sqrt(Math.pow(this.x - player.x, 2) + Math.pow(this.y - player.y, 2));
+        if(d < 50 && player.state !== 'BLOCK' && player.state !== 'DASH') player.hp -= 0.5;
+    }
+    draw() { ctx.fillStyle = this.color; ctx.fillRect(this.x, this.y, this.w, this.h); this.drawHealth(); }
+}
+
+class Player extends Entity {
+    constructor(x, y) {
+        super(x, y, '#3498db');
+        this.angle = 0; this.state = 'IDLE'; this.animFrame = 0;
+        this.dashCooldown = 0; this.weaponIndex = 0;
+        this.cooldowns = { "Espada": 0, "Arco": 0, "Martelo": 0 };
+        this.hitEnemies = new Set();
+        this.facing = 1;
+    }
+
+    update(platforms, enemies, camX, arrows) {
+        if (this.dashCooldown > 0) this.dashCooldown--;
+        for (let k in this.cooldowns) if (this.cooldowns[k] > 0) this.cooldowns[k]--;
+        
+        // Mira Separada
+        if (isAiming) {
+            this.angle = Math.atan2(aimY, aimX);
+        } else if (!isTouchDevice) {
+            this.angle = Math.atan2(mouse.y - (this.y + this.h/2), (mouse.x - camX) - (this.x + this.w/2));
+        }
+        
+        this.facing = Math.abs(this.angle) > Math.PI / 2 ? -1 : 1;
+        const item = inventoryItems[this.weaponIndex];
+
+        // Dash
+        if ((keys['ShiftLeft'] || mobileInput.dash) && this.dashCooldown === 0 && this.state !== 'DASH') {
+            this.state = 'DASH'; this.animFrame = 0; this.vx = this.facing * 20; this.dashCooldown = 45;
+        }
+
+        if (this.state === 'DASH') {
+            this.animFrame += 0.25; if (this.animFrame >= 3) { this.state = 'IDLE'; this.animFrame = 0; }
+        } else {
+            this.vx += (keys['KeyD'] ? 0.9 : (keys['KeyA'] ? -0.9 : (Math.abs(moveX) > 0.1 ? moveX * 1.5 : 0)));
+            this.vx *= FRICTION;
+            if ((keys['KeyW'] || keys['Space'] || mobileInput.jump) && this.grounded) { this.vy = -13; this.grounded = false; }
+            
+            if ((mouse.right || mobileInput.block) && item !== "Martelo") { 
+                this.state = 'BLOCK'; this.vx *= 0.5;
+            } else {
+                if (this.state === 'BLOCK') this.state = 'IDLE';
+                const attacking = mouse.left || mobileInput.attack;
+                if (attacking && this.state !== 'ATTACK' && this.cooldowns[item] <= 0) {
+                    if (item === "Arco") {
+                        arrows.push(new Arrow(this.x+this.w/2, this.y+this.h/2, this.angle, 'player'));
+                        this.cooldowns["Arco"] = 35;
+                    } else {
+                        this.state = 'ATTACK'; this.animFrame = 0;
+                        this.cooldowns[item] = item === "Martelo" ? 70 : 10;
+                    }
+                }
+            }
+            
+            if (this.state === 'ATTACK') {
+                this.animFrame += item === "Martelo" ? 0.2 : 0.4;
+                const limit = item === "Martelo" ? 6 : 5;
+                enemies.forEach(en => {
+                    if (this.hitEnemies.has(en.id)) return;
+                    const reach = item === "Martelo" ? 110 : 90;
+                    const d = Math.sqrt(Math.pow((this.x+this.w/2+Math.cos(this.angle)*reach)-(en.x+en.w/2),2)+Math.pow((this.y+this.h/2+Math.sin(this.angle)*reach)-(en.y+en.h/2),2));
+                    if(d < (item === "Martelo" ? 100 : 80)) { en.hp -= item === "Martelo" ? 40 : 18; this.hitEnemies.add(en.id); }
+                });
+                if (this.animFrame >= limit) { this.state = 'IDLE'; this.animFrame = 0; this.hitEnemies.clear(); }
+            }
+            this.vy += GRAVITY;
+        }
+        this.x += this.vx; this.y += this.vy;
+        this.checkCollisions(platforms);
+    }
+
+    checkCollisions(platforms) {
+        this.grounded = false;
+        platforms.forEach(p => {
+            if (this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
+                if (this.vy > 0 && this.y + this.h - this.vy <= p.y) { this.y = p.y - this.h; this.vy = 0; this.grounded = true; }
+                else if (this.vy < 0) { this.y = p.y + p.h; this.vy = 0; }
+                else { if (this.x < p.x) this.x = p.x - this.w; else this.x = p.x + p.w; this.vx = 0; }
+            }
+        });
+    }
+
+    draw() {
+        this.drawHealth();
+        ctx.save(); ctx.translate(this.x + this.w/2, this.y + this.h/2);
+        
+        if (isAiming || inventoryItems[this.weaponIndex] === "Arco") {
+            ctx.beginPath(); ctx.setLineDash([5, 5]); ctx.moveTo(0, 0);
+            ctx.lineTo(Math.cos(this.angle) * 120, Math.sin(this.angle) * 120);
+            ctx.strokeStyle = "rgba(255,255,255,0.2)"; ctx.stroke(); ctx.setLineDash([]);
+        }
+
+        ctx.save(); ctx.scale(this.facing, 1);
+        let s = (this.state==='DASH') ? sprites['Dash'+(Math.floor(this.animFrame)%3+1)+'.png'] : (inventoryItems[this.weaponIndex]==="Martelo" && this.state!=='ATTACK' ? sprites['comomartelo.png'] : sprites['Atacando.png']);
+        if (s && s.isReady) ctx.drawImage(s, -25, -40, 50, 80);
+        ctx.restore();
+
+        ctx.rotate(this.angle); if (this.facing === -1) ctx.scale(1, -1);
+        if (this.state === 'BLOCK') { let b = sprites['defender.png']; if(b && b.isReady) ctx.drawImage(b, 15, -35, 30, 70); }
+        else if (this.state === 'ATTACK') {
+            const item = inventoryItems[this.weaponIndex];
+            const file = item === "Martelo" ? 'ataquemartelo'+(Math.floor(this.animFrame)%6+1)+'.png' : 'Animacaodeataque'+(Math.floor(this.animFrame)%5+1)+'.png';
+            let a = sprites[file]; if(a && a.isReady) ctx.drawImage(a, 20, -45, 80, 90);
+        } else if (inventoryItems[this.weaponIndex] === "Arco") {
+            let w = sprites['Arco.png']; if(w && w.isReady) ctx.drawImage(w, 15, -25, 40, 50);
+        }
+        ctx.restore();
+    }
+}
+
+const player = new Player(150, 400);
+const enemies = [new Enemy(800, 400), new Enemy(1500, 400)];
+const arrows = [];
+const platforms = [{x: 0, y: 550, w: 5000, h: 60}, {x: 500, y: 420, w: 250, h: 25}, {x: 900, y: 320, w: 200, h: 25}];
+
+function loop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    let camX = Math.min(0, -player.x + canvas.width / 2);
+    ctx.save(); ctx.translate(camX, 0);
+    ctx.fillStyle = '#3a3a3a'; platforms.forEach(p => ctx.fillRect(p.x, p.y, p.w, p.h));
+    if(player.hp > 0) { player.update(platforms, enemies, camX, arrows); player.draw(); }
+    arrows.forEach((a, i) => { a.update(player, enemies); if (a.active) a.draw(); else arrows.splice(i, 1); });
+    enemies.forEach((e, i) => { if(e.hp > 0) { e.update(platforms, player); e.draw(); } else enemies.splice(i, 1); });
+    ctx.restore(); requestAnimationFrame(loop);
+}
+window.onresize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
+window.onload = loop;
+</script>
+</body>
+</html>
